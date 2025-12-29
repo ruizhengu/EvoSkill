@@ -17,10 +17,10 @@ class EvalResult(Generic[T]):
     trace: AgentTrace[T] | None
 
 
-async def evaluate(
+async def evaluate_agent_parallel(
     agent: Agent[T],
     items: list[tuple[str, str]],
-    max_concurrent: int = 5,
+    max_concurrent: int = 2,
 ) -> list[EvalResult[T]]:
     """
     Run agent on multiple questions in parallel.

@@ -16,3 +16,4 @@ results/
 # Virtual environments
 .venv
 .env
+.DS_Store
