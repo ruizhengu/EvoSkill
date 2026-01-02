@@ -34,6 +34,10 @@ class LoopConfig:
     # Evolution mode: which dimension to optimize
     evolution_mode: EvolutionMode = "skill_only"
 
+    # Multi-sample failure analysis: test this many samples before proposing
+    # Helps identify patterns rather than overfitting to single failures
+    failure_sample_count: int = 3
+
     # Feedback configuration
     reset_feedback: bool = True
 

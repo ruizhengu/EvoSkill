@@ -60,6 +60,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of concurrent evaluations (default: 4)",
     )
     parser.add_argument(
+        "--failure-samples",
+        type=int,
+        default=3,
+        help="Number of samples to test per iteration for pattern detection (default: 3)",
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Disable run caching",
@@ -96,6 +102,7 @@ async def main(args: argparse.Namespace):
         no_improvement_limit=args.no_improvement_limit,
         concurrency=args.concurrency,
         evolution_mode=args.mode,
+        failure_sample_count=args.failure_samples,
         cache_enabled=not args.no_cache,
         reset_feedback=not args.no_reset_feedback,
     )

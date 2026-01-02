@@ -150,6 +150,7 @@ class SelfImprovingLoop:
         # 2. Main loop
         no_improvement_count = 0
         iteration_count = 0
+        sample_offset = 0  # Track which samples we've used
 
         for i in range(self.config.max_iterations):
             iteration_count = i + 1
@@ -159,35 +160,61 @@ class SelfImprovingLoop:
             self.manager.switch_to(parent)
             _log(f"ITER {iteration_count}/{self.config.max_iterations}", f"Parent: {parent}")
 
-            # Pick a sample question
-            question, answer = self.train_data[i % len(self.train_data)]
-            _log("", f"  Question: {question[:70]}...")
+            # Test multiple samples and collect failures
+            failures: list[tuple[AgentTrace, str, str]] = []  # (trace, agent_answer, ground_truth)
+            samples_to_test = min(self.config.failure_sample_count, len(self.train_data))
 
-            # Run agent
-            trace = await self.agents.base.run(question)
-            agent_answer = (
-                trace.output.final_answer if trace.output else "[PARSE FAILED]"
-            )
+            for j in range(samples_to_test):
+                sample_idx = (sample_offset + j) % len(self.train_data)
+                question, answer = self.train_data[sample_idx]
+                _log("", f"  [{j+1}/{samples_to_test}] {question[:60]}...")
 
-            # Check if correct (average across multiple tolerance levels)
-            avg_score = _score_multi_tolerance(
-                agent_answer.strip().lower(),
-                answer.strip().lower(),
-            )
-            if avg_score >= 0.8:
-                _log("", f"  \u2713 Correct")
+                # Run agent
+                trace = await self.agents.base.run(question)
+                agent_answer = (
+                    trace.output.final_answer if trace.output else "[PARSE FAILED]"
+                )
+
+                # Check if correct
+                avg_score = _score_multi_tolerance(
+                    agent_answer.strip().lower(),
+                    answer.strip().lower(),
+                )
+                if avg_score >= 0.8:
+                    _log("", f"      [OK]")
+                else:
+                    _log("", f"      [FAIL] got: \"{agent_answer[:100]}...\"")
+                    failures.append((trace, agent_answer, answer))
+
+            sample_offset += samples_to_test  # Move to next batch for next iteration
+
+            # Only propose if we have at least 2 failures (pattern detection)
+            if len(failures) < 2:
+                _log("", f"  -> Only {len(failures)} failure(s), need 2+ to identify patterns. Skipping proposal.")
+                no_improvement_count += 1
+                if no_improvement_count >= self.config.no_improvement_limit:
+                    _log("STOP", f"No improvement for {self.config.no_improvement_limit} iterations")
+                    break
                 continue
 
-            _log("", f"  \u2717 Incorrect (got: \"{agent_answer[:250]}...\", expected: \"{answer[:250]}...\")")
+            _log("", f"  -> {len(failures)} failures detected, proposing improvement...")
 
-            # Run proposer to suggest improvement
-            child_name = await self._mutate(parent, trace, answer, iteration_count)
+            # Get parent's score for comparison
+            parent_score = next(
+                (score for name, score in self.manager.get_frontier_with_scores() if name == parent),
+                0.0
+            )
 
-            if child_name is None:
+            # Run proposer with all failures
+            mutation_result = await self._mutate(parent, failures, iteration_count)
+
+            if mutation_result is None:
                 no_improvement_count += 1
             else:
+                child_name, proposal, justification = mutation_result
+
                 # Evaluate child
-                _log("", f"  \u2192 Evaluating {child_name}...")
+                _log("", f"  -> Evaluating {child_name}...")
                 child_score = await self._evaluate(self.val_data)
 
                 # Update frontier or discard
@@ -196,12 +223,25 @@ class SelfImprovingLoop:
                 )
 
                 if added:
-                    _log("", f"  \u2713 Added to frontier (score: {child_score:.4f})")
+                    _log("", f"  [OK] Added to frontier (score: {child_score:.4f})")
+                    outcome = "improved"
                     no_improvement_count = 0
                 else:
-                    _log("", f"  \u2717 Discarded (score: {child_score:.4f})")
+                    _log("", f"  [SKIP] Discarded (score: {child_score:.4f})")
+                    outcome = "discarded"
                     self.manager.discard(child_name)
                     no_improvement_count += 1
+
+                # Record feedback with outcome for future proposers to learn from
+                append_feedback(
+                    self._feedback_path,
+                    child_name,
+                    proposal,
+                    justification,
+                    outcome=outcome,
+                    score=child_score,
+                    parent_score=parent_score,
+                )
 
             # Check early stopping
             if no_improvement_count >= self.config.no_improvement_limit:
@@ -248,13 +288,13 @@ class SelfImprovingLoop:
 
         # Evaluate and add base to frontier
         self.manager.switch_to("base")
-        _log("", f"  \u2192 Evaluating on {len(self.val_data)} samples...")
+        _log("", f"  -> Evaluating on {len(self.val_data)} samples...")
         base_score = await self._evaluate(self.val_data)
         self.manager.update_frontier(
             "base", base_score, max_size=self.config.frontier_size
         )
-        _log("", f"  \u2192 Base score: {base_score:.4f}")
-        _log("", f"  \u2192 Frontier: {self.manager.get_frontier()}")
+        _log("", f"  -> Base score: {base_score:.4f}")
+        _log("", f"  -> Frontier: {self.manager.get_frontier()}")
 
     async def _evaluate(self, data: list[tuple[str, str]]) -> float:
         """Evaluate base agent on data.
@@ -282,37 +322,35 @@ class SelfImprovingLoop:
     async def _mutate(
         self,
         parent: str,
-        trace: AgentTrace[AgentResponse],
-        answer: str,
+        failures: list[tuple[AgentTrace[AgentResponse], str, str]],
         iteration: int,
-    ) -> str | None:
-        """Run proposer and generator to create a mutation.
+    ) -> tuple[str, str, str] | None:
+        """Run proposer and generator to create a mutation based on multiple failures.
 
         Args:
             parent: Name of the parent program.
-            trace: Agent trace from the failed attempt.
-            answer: Ground truth answer.
+            failures: List of (trace, agent_answer, ground_truth) tuples from failed attempts.
             iteration: Current iteration number.
 
         Returns:
-            Child program name if created, None otherwise.
+            Tuple of (child_name, proposal, justification) if created, None otherwise.
         """
         # Run appropriate proposer based on evolution mode
         evolution_mode = self.config.evolution_mode
-        _log("", f"  → Running {evolution_mode.replace('_only', '')} proposer...")
+        _log("", f"  -> Running {evolution_mode.replace('_only', '')} proposer with {len(failures)} failures...")
         feedback_history = read_feedback_history(self._feedback_path)
-        proposer_query = build_proposer_query(trace, answer, feedback_history)
+        proposer_query = build_proposer_query(failures, feedback_history, evolution_mode)
 
         if evolution_mode == "skill_only":
             proposer_trace = await self.agents.skill_proposer.run(proposer_query)
 
             if proposer_trace.output is None:
-                _log("", f"  ⚠ Skill proposer failed: {proposer_trace.parse_error}")
+                _log("", f"  [WARN] Skill proposer failed: {proposer_trace.parse_error}")
                 return None
 
             proposed = proposer_trace.output.proposed_skill
             justification = proposer_trace.output.justification
-            _log("", f"  → Proposal: skill - {proposed[:50]}...")
+            _log("", f"  -> Proposal: skill - {proposed[:50]}...")
 
             # Create child program branch
             child_name = f"iter-{iteration}"
@@ -321,7 +359,7 @@ class SelfImprovingLoop:
             self.manager.create_program(child_name, child_config, parent=parent)
 
             # Generate skill
-            _log("", f"  → Generating skill...")
+            _log("", f"  -> Generating skill...")
             skill_query = build_skill_query_from_skill_proposer(proposer_trace)
             skill_trace = await self.agents.skill_generator.run(skill_query)
             if skill_trace.output:
@@ -331,12 +369,12 @@ class SelfImprovingLoop:
             proposer_trace = await self.agents.prompt_proposer.run(proposer_query)
 
             if proposer_trace.output is None:
-                _log("", f"  ⚠ Prompt proposer failed: {proposer_trace.parse_error}")
+                _log("", f"  [WARN] Prompt proposer failed: {proposer_trace.parse_error}")
                 return None
 
             proposed = proposer_trace.output.proposed_prompt_change
             justification = proposer_trace.output.justification
-            _log("", f"  → Proposal: prompt - {proposed[:50]}...")
+            _log("", f"  -> Proposal: prompt - {proposed[:50]}...")
 
             # Create child program branch
             child_name = f"iter-{iteration}"
@@ -346,7 +384,7 @@ class SelfImprovingLoop:
             self.manager.create_program(child_name, child_config, parent=parent)
 
             # Generate optimized prompt
-            _log("", f"  → Generating optimized prompt...")
+            _log("", f"  -> Generating optimized prompt...")
             prompt_query = build_prompt_query_from_prompt_proposer(
                 proposer_trace, original_prompt
             )
@@ -359,10 +397,8 @@ class SelfImprovingLoop:
         # Commit changes
         self.manager.commit(f"{child_name}: {proposed[:50]}")
 
-        # Append to feedback history
-        append_feedback(self._feedback_path, child_name, proposed, justification)
-
-        return child_name
+        # Return mutation info (feedback will be written by caller with outcome)
+        return (child_name, proposed, justification)
 
     def _get_best_parent(self) -> str:
         """Get best program from frontier, or 'base' if frontier is empty."""

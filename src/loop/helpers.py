@@ -9,31 +9,50 @@ if TYPE_CHECKING:
 
 
 def build_proposer_query(
-    trace: "AgentTrace", ground_truth: str, feedback_history: str
+    traces_with_answers: list[tuple["AgentTrace", str, str]],
+    feedback_history: str,
+    evolution_mode: str = "skill_only",
 ) -> str:
-    """Build the query for the proposer agent.
+    """Build the query for the proposer agent from multiple failure traces.
 
     Args:
-        trace: The agent trace from the failed attempt.
-        ground_truth: The correct answer.
+        traces_with_answers: List of (trace, agent_answer, ground_truth) tuples.
         feedback_history: Previous feedback history.
+        evolution_mode: "skill_only" or "prompt_only" - affects trace truncation.
 
     Returns:
         Formatted query string for the proposer.
     """
-    if trace.output is None:
-        agent_answer = f"[PARSE FAILED: {trace.parse_error}]"
-    else:
-        agent_answer = trace.output.final_answer
+    # Build failure summaries
+    failure_sections = []
+    for i, (trace, agent_answer, ground_truth) in enumerate(traces_with_answers, 1):
+        # For prompt mode, use more aggressive truncation to focus on patterns
+        # For skill mode, keep full trace to see tool usage
+        if evolution_mode == "prompt_only":
+            trace_summary = trace.summarize(head_chars=20_000, tail_chars=10_000)
+        else:
+            trace_summary = trace.summarize()
+
+        failure_sections.append(f"""### Failure {i}
+{trace_summary}
+
+Agent Answer: {agent_answer}
+Ground Truth: {ground_truth}
+""")
+
+    failures_text = "\n".join(failure_sections)
 
     return f"""## Previous Attempts Feedback
 {feedback_history}
 
-## Current Attempt
-{trace.summarize()}
+## Current Failures ({len(traces_with_answers)} samples)
 
-Agent Answer: {agent_answer}
-Ground Truth: {ground_truth}"""
+Analyze the patterns across these failures to identify a GENERAL improvement, not a fix for any single case.
+
+{failures_text}
+
+## Your Task
+Identify what COMMON pattern or capability gap caused these failures. Propose an improvement that would help across ALL these cases, not just one."""
 
 
 def build_skill_query(proposer_trace: "AgentTrace[ProposerResponse]") -> str:
@@ -73,20 +92,37 @@ def build_prompt_query(
 
 
 def append_feedback(
-    path: Path, iteration: str, skill: str, justification: str
+    path: Path,
+    iteration: str,
+    proposal: str,
+    justification: str,
+    outcome: str | None = None,
+    score: float | None = None,
+    parent_score: float | None = None,
 ) -> None:
-    """Append feedback entry to history file.
+    """Append feedback entry to history file with outcome tracking.
 
     Args:
         path: Path to the feedback history file.
         iteration: Iteration identifier (e.g., "iter-1").
-        skill: The skill or prompt that was proposed.
+        proposal: The skill or prompt that was proposed.
         justification: Why this change was proposed.
+        outcome: "improved", "no_improvement", or "discarded".
+        score: The score achieved after applying this proposal.
+        parent_score: The parent's score before this proposal.
     """
+    # Build outcome section if available
+    outcome_section = ""
+    if outcome is not None:
+        delta = (score - parent_score) if (score is not None and parent_score is not None) else None
+        delta_str = f" ({delta:+.4f})" if delta is not None else ""
+        score_str = f" (score: {score:.4f}{delta_str})" if score is not None else ""
+        outcome_section = f"\n**Outcome**: {outcome.upper()}{score_str}"
+
     entry = f"""
 ## {iteration}
-**Skill or Prompt**: {skill}
-**Justification**: {justification}
+**Proposal**: {proposal}
+**Justification**: {justification}{outcome_section}
 
 """
     with open(path, "a") as f:
