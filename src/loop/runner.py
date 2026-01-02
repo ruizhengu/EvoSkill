@@ -310,8 +310,8 @@ class SelfImprovingLoop:
 
         score = 0.0
         for result in results:
-            if result.trace.output is None:
-                continue  # Parse failed = 0 score (already initialized to 0.0)
+            if result.trace is None or result.trace.output is None:
+                continue  # Timeout/error/parse failed = 0 score
             score += _score_multi_tolerance(
                 result.trace.output.final_answer,
                 result.ground_truth,
