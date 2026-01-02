@@ -1,5 +1,6 @@
 """Self-improving agent loop runner."""
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -160,44 +161,42 @@ class SelfImprovingLoop:
             self.manager.switch_to(parent)
             _log(f"ITER {iteration_count}/{self.config.max_iterations}", f"Parent: {parent}")
 
-            # Test multiple samples and collect failures
-            failures: list[tuple[AgentTrace, str, str]] = []  # (trace, agent_answer, ground_truth)
+            # Test multiple samples in parallel and collect failures
             samples_to_test = min(self.config.failure_sample_count, len(self.train_data))
+            test_samples = [
+                self.train_data[(sample_offset + j) % len(self.train_data)]
+                for j in range(samples_to_test)
+            ]
+            sample_offset += samples_to_test
 
-            for j in range(samples_to_test):
-                sample_idx = (sample_offset + j) % len(self.train_data)
-                question, answer = self.train_data[sample_idx]
-                _log("", f"  [{j+1}/{samples_to_test}] {question[:60]}...")
+            _log("", f"  Testing {samples_to_test} samples in parallel...")
 
-                # Run agent
-                trace = await self.agents.base.run(question)
+            # Run all samples concurrently
+            traces = await asyncio.gather(*[
+                self.agents.base.run(question) for question, _ in test_samples
+            ])
+
+            # Collect failures
+            failures: list[tuple[AgentTrace, str, str]] = []
+            for trace, (question, answer) in zip(traces, test_samples):
                 agent_answer = (
                     trace.output.final_answer if trace.output else "[PARSE FAILED]"
                 )
-
-                # Check if correct
                 avg_score = _score_multi_tolerance(
                     agent_answer.strip().lower(),
                     answer.strip().lower(),
                 )
-                if avg_score >= 0.8:
-                    _log("", f"      [OK]")
-                else:
-                    _log("", f"      [FAIL] got: \"{agent_answer[:100]}...\"")
+                status = "[OK]" if avg_score >= 0.8 else "[FAIL]"
+                _log("", f"    {status} {question[:50]}...")
+                if avg_score < 0.8:
                     failures.append((trace, agent_answer, answer))
 
-            sample_offset += samples_to_test  # Move to next batch for next iteration
-
-            # Only propose if we have at least 2 failures (pattern detection)
-            if len(failures) < 2:
-                _log("", f"  -> Only {len(failures)} failure(s), need 2+ to identify patterns. Skipping proposal.")
-                no_improvement_count += 1
-                if no_improvement_count >= self.config.no_improvement_limit:
-                    _log("STOP", f"No improvement for {self.config.no_improvement_limit} iterations")
-                    break
+            # Always propose if any failures exist
+            if len(failures) == 0:
+                _log("", f"  -> All samples passed, no proposal needed")
                 continue
 
-            _log("", f"  -> {len(failures)} failures detected, proposing improvement...")
+            _log("", f"  -> {len(failures)} failure(s), proposing improvement...")
 
             # Get parent's score for comparison
             parent_score = next(
