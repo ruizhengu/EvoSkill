@@ -352,7 +352,7 @@ class SelfImprovingLoop:
             _log("", f"  -> Proposal: skill - {proposed[:50]}...")
 
             # Create child program branch
-            child_name = f"iter-{iteration}"
+            child_name = f"iter-skill-{iteration}"
             parent_config = self.manager.get_current()
             child_config = parent_config.mutate(child_name)
             self.manager.create_program(child_name, child_config, parent=parent)
@@ -376,7 +376,7 @@ class SelfImprovingLoop:
             _log("", f"  -> Proposal: prompt - {proposed[:50]}...")
 
             # Create child program branch
-            child_name = f"iter-{iteration}"
+            child_name = f"iter-prompt-{iteration}"
             parent_config = self.manager.get_current()
             original_prompt = parent_config.system_prompt
             child_config = parent_config.mutate(child_name)
