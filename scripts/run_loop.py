@@ -86,6 +86,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Don't reset feedback history on start",
     )
+    parser.add_argument(
+        "--continue",
+        dest="continue_loop",  # 'continue' is reserved keyword
+        action="store_true",
+        help="Continue from existing frontier/branch instead of starting fresh",
+    )
     # Training composition
     parser.add_argument(
         "--train-easy-count",
@@ -200,6 +206,7 @@ async def main(args: argparse.Namespace):
         failure_sample_count=args.failure_samples,
         cache_enabled=not args.no_cache,
         reset_feedback=not args.no_reset_feedback,
+        continue_mode=args.continue_loop,
     )
 
     print(f"Running loop with evolution_mode={args.mode}")

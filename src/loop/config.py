@@ -41,6 +41,10 @@ class LoopConfig:
     # Feedback configuration
     reset_feedback: bool = True
 
+    # Continue mode: False = start fresh (reset iteration numbering),
+    # True = continue from existing frontier/branch
+    continue_mode: bool = False
+
     # Cache configuration
     cache_enabled: bool = True
     cache_dir: Path = field(default_factory=lambda: Path(".cache/runs"))

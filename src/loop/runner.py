@@ -135,15 +135,25 @@ class SelfImprovingLoop:
         else:
             self.cache = None
 
+        # Iteration offset for continue mode
+        self._iteration_offset = 0
+
     async def run(self) -> LoopResult:
         """Run the full self-improving loop.
 
         Returns:
             LoopResult with frontier, best program, and iteration count.
         """
-        # 0. Reset feedback history if configured
-        if self.config.reset_feedback and self._feedback_path.exists():
-            self._feedback_path.unlink()
+        # 0. Handle feedback and iteration offset based on mode
+        if not self.config.continue_mode:
+            # Start fresh: reset feedback if configured, reset iteration numbering
+            if self.config.reset_feedback and self._feedback_path.exists():
+                self._feedback_path.unlink()
+            self._iteration_offset = 0
+        else:
+            # Continue mode: keep feedback, find highest iteration number
+            self._iteration_offset = self._get_highest_iteration()
+            _log("CONTINUE", f"Resuming from iteration {self._iteration_offset}")
 
         # 1. Create and evaluate base program if needed
         await self._ensure_base_program()
@@ -334,6 +344,9 @@ class SelfImprovingLoop:
         Returns:
             Tuple of (child_name, proposal, justification) if created, None otherwise.
         """
+        # Calculate actual iteration number (with offset for continue mode)
+        actual_iteration = iteration + self._iteration_offset
+
         # Run appropriate proposer based on evolution mode
         evolution_mode = self.config.evolution_mode
         _log("", f"  -> Running {evolution_mode.replace('_only', '')} proposer with {len(failures)} failures...")
@@ -352,7 +365,7 @@ class SelfImprovingLoop:
             _log("", f"  -> Proposal: skill - {proposed[:50]}...")
 
             # Create child program branch
-            child_name = f"iter-skill-{iteration}"
+            child_name = f"iter-skill-{actual_iteration}"
             parent_config = self.manager.get_current()
             child_config = parent_config.mutate(child_name)
             self.manager.create_program(child_name, child_config, parent=parent)
@@ -376,7 +389,7 @@ class SelfImprovingLoop:
             _log("", f"  -> Proposal: prompt - {proposed[:50]}...")
 
             # Create child program branch
-            child_name = f"iter-prompt-{iteration}"
+            child_name = f"iter-prompt-{actual_iteration}"
             parent_config = self.manager.get_current()
             original_prompt = parent_config.system_prompt
             child_config = parent_config.mutate(child_name)
@@ -403,3 +416,22 @@ class SelfImprovingLoop:
         """Get best program from frontier, or 'base' if frontier is empty."""
         best = self.manager.get_best_from_frontier()
         return best if best else "base"
+
+    def _get_highest_iteration(self) -> int:
+        """Find the highest iteration number across all iter-* branches.
+
+        Returns:
+            The highest iteration number found, or 0 if none exist.
+        """
+        programs = self.manager.list_programs()
+        max_iter = 0
+        for p in programs:
+            # Match iter-skill-N or iter-prompt-N or iter-N
+            if p.startswith("iter-"):
+                parts = p.split("-")
+                try:
+                    num = int(parts[-1])
+                    max_iter = max(max_iter, num)
+                except ValueError:
+                    pass
+        return max_iter
