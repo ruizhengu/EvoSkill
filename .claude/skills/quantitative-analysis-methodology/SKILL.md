@@ -66,6 +66,15 @@ These are NOT the same date. Find end-of-March exchange rates or document why th
 - ❌ WRONG: Use March 1 exchange rate for end-of-March Treasury price
 - ✓ CORRECT: Use end-of-March exchange rate for end-of-March Treasury price
 
+### BLOCKED: Incomplete Multi-Period Data
+
+**If computing ratios, growth rates, or year-over-year changes and you only have ONE data point, STOP.**
+
+You MUST extract distinct values for EACH time period. Using the same value for multiple periods is ALWAYS WRONG.
+
+- ❌ WRONG: Extract 1964 Treasury value ($209,344M), apply it to 1964, 1965, 1966
+- ✓ CORRECT: Extract 1964 value from 1964 bulletin, 1965 value from 1965 bulletin, 1966 value from 1966 bulletin
+
 ---
 
 ## ⚠️ MOST COMMON ERRORS — CHECK BEFORE PROCEEDING
@@ -74,8 +83,9 @@ These are NOT the same date. Find end-of-March exchange rates or document why th
 |---------|---------------|----------------|------------------|
 | 1 | Taking min(yield levels) as ES | ES requires RETURNS, not levels | Compute returns first, then ES on returns |
 | 2 | Using March 1 exchange rates for end-of-March prices | Dates must match exactly | Use end-of-March exchange rates |
+| 3 | Using single data point for all periods in time series | Ratios will be trivially 1.0 or wrong | Extract separate values for each year/period |
 
-**If your approach matches either error pattern above, STOP and reconsider.**
+**If your approach matches any error pattern above, STOP and reconsider.**
 
 ---
 
@@ -137,6 +147,26 @@ Check 3: Error Convention
   - Formula: Error = Actual - Forecast
   - Status: [PASS if using standard convention]
 OVERALL: [PASS - proceed / BLOCKED - halt and resolve]
+```
+
+### For Multi-Period Time Series Calculations
+
+```
+VALIDATION CHECKPOINT - Multi-Period Data Completeness
+Check 1: Periods Required
+  - Question asks about years/periods: [list all periods, e.g., 1964, 1965, 1966]
+  - Distinct data points needed: [N]
+  - Status: [PASS if N >= 2 for ratios / BLOCKED if N < 2]
+Check 2: Data Extracted for Each Period
+  - Period 1: [year] → Value: [X] → Source: [document/line]
+  - Period 2: [year] → Value: [Y] → Source: [document/line]
+  - Period 3: [year] → Value: [Z] → Source: [document/line]
+  - Are all values DISTINCT (not the same number repeated)?: [YES/NO]
+  - Status: [PASS if distinct values / BLOCKED if same value repeated]
+Check 3: Source Document Dates
+  - Does each value come from a document dated to that period?: [YES/NO]
+  - Status: [PASS if period-matched / FLAG if using single-period data for all]
+OVERALL: [PASS - proceed / BLOCKED - must find data for each period]
 ```
 
 ---
@@ -398,6 +428,49 @@ Systematic ±5 error often indicates exchange rate date misalignment when conver
 
 ---
 
+## Part 8: Multi-Period Time Series Calculations
+
+### Year-over-Year Ratio Calculations
+
+**CRITICAL: Ratios require DISTINCT values for numerator and denominator periods.**
+
+When computing:
+- Year-over-year ratios: Y_t / Y_{t-1}
+- Growth rates: (Y_t - Y_{t-1}) / Y_{t-1}
+- Multi-year differences: |ratio_1 - ratio_2|
+
+You MUST extract separate data for EACH time period.
+
+**Example - Computing ratio difference across 3 years:**
+
+Question: "What is the absolute difference between the 1965/1964 ratio and 1966/1965 ratio of Treasury securities in INR?"
+
+Required data extraction:
+- Treasury value for 1964: [from 1964 bulletin]
+- Treasury value for 1965: [from 1965 bulletin]
+- Treasury value for 1966: [from 1966 bulletin]
+- Exchange rate for 1964
+- Exchange rate for 1965
+- Exchange rate for 1966
+
+**Self-Check:** If your ratio calculation yields exactly 1.0, verify you didn't use the same underlying value for both periods.
+
+### Data Extraction Strategy for Multi-Period Queries
+
+1. **Identify all required periods** from the question (e.g., 1964, 1965, 1966)
+2. **For each period**, locate the appropriate source document (e.g., Treasury Bulletin from that year)
+3. **Extract and record** the value for each period with its source
+4. **Verify distinctness** - if values are identical, confirm this is correct (unusual for multi-year Treasury data)
+5. **Then proceed** with calculations
+
+### Output Verification for Time Series
+
+If computing year-over-year ratios and ANY ratio equals exactly 1.0000:
+- Verify this reflects genuine data (same values across years is rare for Treasury data)
+- If you used the same extracted value for multiple years, GO BACK and find period-specific values
+
+---
+
 ## Quick Decision Tree
 
 ```
@@ -427,6 +500,13 @@ Starting a financial analysis task?
 │   │   └── "March 1" ≠ "end of March" → BLOCKED
 │   ├── Verify rate direction (per USD or per foreign)
 │   └── Validate converted magnitude is reasonable
+│
+├── Calculating year-over-year ratios or time series metrics?
+│   ├── Do you have data extracted for EACH time period?
+│   │   ├── YES → Proceed with calculation
+│   │   └── NO → BLOCKED - find data for each required period
+│   └── OUTPUT CHECK: Does any ratio equal exactly 1.0?
+│       └── YES → Verify you didn't reuse same value for multiple periods
 │
 └── Classification task?
     └── Check references/federal-accounting.md for definitions
