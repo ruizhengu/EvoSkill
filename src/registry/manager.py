@@ -437,7 +437,13 @@ class ProgramManager:
         result = self._run_git(["diff", "--cached", "--quiet"], check=False)
         if result.returncode != 0:
             # There are staged changes, commit them
-            self._run_git(["commit", "-m", message])
+            commit_result = self._run_git(["commit", "-m", message], check=False)
+            if commit_result.returncode != 0:
+                # Log error but don't crash - common issues: no user config, lock file, etc.
+                import logging
+                logging.warning(
+                    f"Git commit failed (exit {commit_result.returncode}): {commit_result.stderr.strip()}"
+                )
 
     def _git_tag(self, tag: str) -> None:
         """Create a tag at current HEAD."""
