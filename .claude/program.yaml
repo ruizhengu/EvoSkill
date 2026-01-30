@@ -1,6 +1,6 @@
-name: iter-skill-10
-parent: program/iter-skill-1
-generation: 2
+name: iter-skill-15
+parent: program/iter-skill-10
+generation: 3
 system_prompt:
   type: preset
   preset: claude_code
@@ -96,5 +96,4 @@ output_format:
     title: AgentResponse
     type: object
 metadata:
-  created_at: '2026-01-30T18:23:32.568534'
-  score: 0.6678571428571428
+  created_at: '2026-01-30T21:35:59.090881'
