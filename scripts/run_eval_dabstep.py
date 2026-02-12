@@ -30,8 +30,8 @@ async def main():
         "--dataset",
         "-d",
         type=Path,
-        required=True,
-        help="Path to dabstep CSV file",
+        default=Path(".dataset/dabstep_data.csv"),
+        help="Path to dabstep CSV file (default: .dataset/dabstep_data.csv)",
     )
     parser.add_argument(
         "--data-dir",
@@ -76,9 +76,8 @@ async def main():
         "--model",
         "-m",
         type=str,
-        choices=["opus", "sonnet", "haiku"],
-        default=None,
-        help="Model for agent (default: opus)",
+        default="claude-opus-4-5-20251101",
+        help="Model for agent (default: claude-opus-4-5-20251101)",
     )
     args = parser.parse_args()
 
@@ -139,7 +138,7 @@ async def main():
     correct = 0
     for r in successful:
         if r.trace and r.trace.output and r.trace.output.final_answer:
-            score = question_scorer(str(r.ground_truth), str(r.trace.output.final_answer))
+            score = question_scorer(str(r.trace.output.final_answer), str(r.ground_truth))
             if score:
                 correct += 1
 
