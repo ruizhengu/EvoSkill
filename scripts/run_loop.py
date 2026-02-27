@@ -20,6 +20,7 @@ from src.agent_profiles import (
     prompt_proposer_options,
     skill_generator_options,
     prompt_generator_options,
+    set_sdk,
 )
 from src.agent_profiles.skill_generator import get_project_root
 from src.registry import ProgramManager
@@ -83,6 +84,10 @@ class LoopSettings(BaseSettings):
     model: Optional[str] = Field(
         default=None, description="Model for base agent (opus, sonnet, haiku)"
     )
+    sdk: Literal["claude", "opencode"] = Field(
+        default="claude",
+        description="SDK to use: 'claude' or 'opencode'",
+    )
 
 
 def stratified_split(
@@ -131,6 +136,9 @@ def stratified_split(
 
 
 async def main(settings: LoopSettings):
+    # Set SDK based on CLI argument
+    set_sdk(settings.sdk)
+
     data = pd.read_csv(settings.dataset)
 
     # Stratified split by category

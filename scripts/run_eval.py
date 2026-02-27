@@ -12,7 +12,12 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-from src.agent_profiles import Agent, base_agent_options, make_base_agent_options
+from src.agent_profiles import (
+    Agent,
+    base_agent_options,
+    make_base_agent_options,
+    set_sdk,
+)
 from src.evaluation.eval_full import evaluate_full, load_results
 from src.schemas import AgentResponse
 
@@ -43,9 +48,15 @@ class EvalSettings(BaseSettings):
         default=Path("~/officeqa/officeqa.csv").expanduser(),
         description="Path to OfficeQA dataset CSV",
     )
+    sdk: Literal["claude", "opencode"] = Field(
+        default="claude",
+        description="SDK to use: 'claude' or 'opencode'",
+    )
 
 
 async def main(settings: EvalSettings):
+    set_sdk(settings.sdk)
+
     # Load dataset
     data = pd.read_csv(settings.dataset_path)
 
@@ -75,7 +86,7 @@ async def main(settings: EvalSettings):
     model_info = f" (model: {settings.model})" if settings.model else " (model: opus)"
     print(f"Agent configured{model_info}")
 
-    results = await evaluate_full(
+    await evaluate_full(
         agent=agent,
         items=items,
         output_path=settings.output,
