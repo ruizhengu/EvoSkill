@@ -3,11 +3,17 @@
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
 import pandas as pd
 
-from src.agent_profiles import Agent, make_livecodebench_agent_options, set_sdk
+from src.agent_profiles import (
+    Agent,
+    make_livecodebench_agent_options,
+    set_api_config,
+    set_sdk,
+)
 from src.evaluation.eval_full import evaluate_full, load_results
 from src.evaluation.livecodebench import (
     score_livecodebench,
@@ -80,7 +86,68 @@ async def main():
         default="claude",
         help="SDK to use: 'claude' or 'opencode' (default: claude)",
     )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help="Path to .env file with API credentials (e.g., .env.minimax)",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="API key (ANTHROPIC_API_KEY)",
+    )
+    parser.add_argument(
+        "--auth-token",
+        type=str,
+        default=None,
+        help="Auth token (ANTHROPIC_AUTH_TOKEN)",
+    )
+    parser.add_argument(
+        "--base-url",
+        type=str,
+        default=None,
+        help="Base URL for API (ANTHROPIC_BASE_URL)",
+    )
+    parser.add_argument(
+        "--use-harbor",
+        action="store_true",
+        help="Use Harbor for parallel execution (requires HARBOR_ENABLED=true)",
+    )
     args = parser.parse_args()
+
+    # Unset CLAUDECODE to allow running Claude Code CLI from within Claude Code
+    if "CLAUDECODE" in os.environ:
+        del os.environ["CLAUDECODE"]
+
+    # Load environment variables from file if specified
+    if args.env_file:
+        env_path = Path(args.env_file)
+        if env_path.exists():
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        if "=" in line:
+                            key, value = line.split("=", 1)
+                            os.environ[key.strip()] = value.strip()
+            print(f"Loaded environment from {args.env_file}")
+        else:
+            print(f"Warning: {args.env_file} not found, skipping")
+
+    # Set custom API configuration
+    api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY")
+    auth_token = args.auth_token or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    base_url = args.base_url or os.environ.get("ANTHROPIC_BASE_URL")
+
+    if api_key or auth_token or base_url:
+        set_api_config(
+            api_key=api_key,
+            auth_token=auth_token,
+            base_url=base_url,
+        )
+        print(f"API config: base_url={base_url}")
 
     # Set SDK
     set_sdk(args.sdk)

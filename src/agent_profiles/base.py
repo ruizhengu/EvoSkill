@@ -1,11 +1,18 @@
 import asyncio
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any, Callable, Generic, Optional, Type, TypeVar, Union
 
 from pydantic import BaseModel, ValidationError
 
-from .sdk_config import is_claude_sdk
+from .sdk_config import get_api_env_vars, is_claude_sdk
+from src.tracing.arize_tracing import (
+    init_tracer,
+    is_tracing_enabled,
+    record_trace_result,
+    trace_agent_call,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,24 +139,43 @@ class Agent(Generic[T]):
             # Claude SDK path
             from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-            # Convert dict to ClaudeAgentOptions if needed
-            if isinstance(options, dict):
-                claude_opts = ClaudeAgentOptions(
-                    system_prompt=options.get("system"),
-                    allowed_tools=list(options.get("tools", {}).keys())
-                    if options.get("tools")
-                    else [],
-                    output_format=options.get("format"),
-                    setting_sources=["user", "project"],
-                    permission_mode="acceptEdits",
-                )
-                if "model_id" in options and "claude" in options["model_id"].lower():
-                    claude_opts.model = options["model_id"]
-                options = claude_opts
+            # Apply custom API environment variables
+            api_env = get_api_env_vars()
+            original_env = {}
+            if api_env:
+                # Save original values
+                for key in api_env:
+                    if key in os.environ:
+                        original_env[key] = os.environ[key]
+                    os.environ[key] = api_env[key]
 
-            async with ClaudeSDKClient(options) as client:
-                await client.query(query)
-                return [msg async for msg in client.receive_response()]
+            try:
+                # Convert dict to ClaudeAgentOptions if needed
+                if isinstance(options, dict):
+                    claude_opts = ClaudeAgentOptions(
+                        system_prompt=options.get("system"),
+                        allowed_tools=list(options.get("tools", {}).keys())
+                        if options.get("tools")
+                        else [],
+                        output_format=options.get("format"),
+                        setting_sources=["user", "project"],
+                        permission_mode="acceptEdits",
+                    )
+                    if "model_id" in options and "claude" in options["model_id"].lower():
+                        claude_opts.model = options["model_id"]
+                    options = claude_opts
+
+                async with ClaudeSDKClient(options) as client:
+                    await client.query(query)
+                    return [msg async for msg in client.receive_response()]
+            finally:
+                # Restore original environment variables
+                for key, value in original_env.items():
+                    os.environ[key] = value
+                # Remove any env vars we set that weren't there before
+                for key in api_env:
+                    if key not in original_env:
+                        os.environ.pop(key, None)
         else:
             # OpenCode SDK path
             from opencode_ai import AsyncOpencode
@@ -227,7 +253,44 @@ class Agent(Generic[T]):
         raise last_error if last_error else RuntimeError("All retries exhausted")
 
     async def run(self, query: str) -> AgentTrace[T]:
-        messages = await self._run_with_retry(query)
+        # Initialize tracing if enabled
+        tracing_enabled = is_tracing_enabled()
+        if tracing_enabled:
+            init_tracer()
+
+        # Get model and tools for tracing
+        options = self._get_options()
+        if is_claude_sdk():
+            if isinstance(options, dict):
+                model_name = options.get("model_id", "unknown")
+                tools = list(options.get("tools", {}).keys()) if options.get("tools") else []
+            else:
+                model_name = getattr(options, "model", "unknown")
+                tools = list(options.allowed_tools) if hasattr(options, "allowed_tools") else []
+        else:
+            model_name = options.get("model_id", "unknown") if isinstance(options, dict) else "unknown"
+            tools = list(options.get("tools", {}).keys()) if isinstance(options, dict) and options.get("tools") else []
+
+        # Wrap execution in tracing context
+        if tracing_enabled:
+            async with trace_agent_call(query, model_name, tools) as trace_data:
+                messages = await self._run_with_retry(query)
+
+                # Record results to trace after getting response
+                if is_claude_sdk():
+                    last = messages[-1] if messages else None
+                    if last and trace_data.get("success"):
+                        span = trace_data.get("span")
+                        record_trace_result(
+                            span=span,
+                            duration_ms=getattr(last, "duration_ms", 0),
+                            total_cost_usd=getattr(last, "total_cost_usd", 0),
+                            usage=getattr(last, "usage", {}),
+                            result=getattr(last, "result", ""),
+                            is_error=getattr(last, "is_error", False),
+                        )
+        else:
+            messages = await self._run_with_retry(query)
 
         if is_claude_sdk():
             # Claude SDK: messages list with SystemMessage, AssistantMessage, ResultMessage
@@ -249,11 +312,16 @@ class Agent(Generic[T]):
                     "No structured output returned (context limit likely exceeded)"
                 )
 
+            # Get model from response or fallback to options
+            response_model = first.data.get("model") if first.data else None
+            if not response_model:
+                response_model = model_name  # Fallback to model from options
+
             return AgentTrace(
-                uuid=first.data.get("uuid"),
+                uuid=first.data.get("uuid") if first.data else "unknown",
                 session_id=last.session_id,
-                model=first.data.get("model"),
-                tools=first.data.get("tools", []),
+                model=response_model,
+                tools=first.data.get("tools", []) if first.data else [],
                 duration_ms=last.duration_ms,
                 total_cost_usd=last.total_cost_usd,
                 num_turns=last.num_turns,
