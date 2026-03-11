@@ -1,3 +1,5 @@
+agent_outputs
+
 # Python-generated files
 __pycache__/
 *.py[oc]
