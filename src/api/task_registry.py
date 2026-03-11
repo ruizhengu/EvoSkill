@@ -125,5 +125,44 @@ def _register_builtins() -> None:
         )
     )
 
+    # Register SkillsBench tasks
+    from src.agent_profiles import make_livecodebench_agent_options
+
+    register_task(
+        TaskConfig(
+            name="fix-build-agentops",
+            make_agent_options=make_livecodebench_agent_options,
+            scorer=None,
+            question_col="question",
+            answer_col="ground_truth",
+            category_col="category",
+            default_dataset=".dataset/skillsbench/fix-build-agentops.csv",
+        )
+    )
+
+    register_task(
+        TaskConfig(
+            name="python-scala-translation",
+            make_agent_options=make_livecodebench_agent_options,
+            scorer=None,
+            question_col="question",
+            answer_col="ground_truth",
+            category_col="category",
+            default_dataset=".dataset/skillsbench/python-scala-translation.csv",
+        )
+    )
+
+    register_task(
+        TaskConfig(
+            name="spring-boot-jakarta-migration",
+            make_agent_options=make_livecodebench_agent_options,
+            scorer=None,
+            question_col="question",
+            answer_col="ground_truth",
+            category_col="category",
+            default_dataset=".dataset/skillsbench/spring-boot-jakarta-migration.csv",
+        )
+    )
+
 
 _register_builtins()
