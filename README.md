@@ -256,6 +256,70 @@ Common eval flags: `--output <path>`, `--max-concurrent <n>`, `--num-samples <n>
 
 ---
 
+## 🔧 Scripts Overview
+
+EvoSkill provides two types of scripts for different purposes:
+
+### Loop Scripts (`run_loop*.py`)
+These scripts **discover and generate new skills** through an evolutionary loop:
+- Proposes new skill ideas based on failure patterns
+- Generates skill code
+- Evaluates them on benchmarks
+- Saves successful skills to `.claude/skills/`
+
+**Usage:**
+```bash
+# Run skill discovery loop
+uv run python scripts/run_loop.py --model MiniMax-M2.5-highspeed
+
+# With custom parameters
+uv run python scripts/run_loop.py --mode skill_only --max-iterations 20 --model claude-opus-4-5-20251101
+```
+
+### Evaluation Scripts (`run_eval*.py`)
+These scripts **test an agent on a benchmark** without generating new skills:
+- Uses the base Claude Code agent (or custom model)
+- Runs through benchmark questions
+- Reports pass rates and metrics
+
+**Usage:**
+```bash
+# Evaluate on LiveCodeBench
+uv run python scripts/run_eval_livecodebench.py --model MiniMax-M2.5-highspeed
+
+# Evaluate with custom settings
+uv run python scripts/run_eval_livecodebench.py --model claude-opus-4-5-20251101 --num-samples 10
+```
+
+### MiniMax Model Support
+EvoSkill supports MiniMax models via Anthropic API compatibility:
+
+```bash
+# Using environment variables
+export ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+export ANTHROPIC_API_KEY=your-api-key
+export ANTHROPIC_AUTH_TOKEN=your-auth-token
+
+# Or using .env file
+uv run python scripts/run_eval_livecodebench.py --env-file .env.minimax --model MiniMax-M2.5-highspeed
+```
+
+### Phoenix Tracing
+Enable tracing to visualize agent behavior:
+
+```bash
+# Local Phoenix server
+export PHOENIX_ENDPOINT=http://localhost:6006
+export ARIZE_TRACE_ENABLED=true
+
+# Or Phoenix cloud
+export PHOENIX_ENDPOINT=https://app.phoenix.arize.com
+export PHOENIX_API_KEY=your-key
+export ARIZE_TRACE_ENABLED=true
+```
+
+---
+
 ## 🔑 Key Concepts
 
 - **Program** — A versioned agent configuration (system prompt + skills), stored as a git branch.
