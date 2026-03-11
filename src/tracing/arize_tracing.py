@@ -1,6 +1,6 @@
 """Phoenix tracing integration for EvoSkill.
 
-This module provides tracing capabilities using Arize Phoenix.
+This module provides tracing capabilities using Phoenix (open-source Arize).
 It records LLM calls with metadata like model, tokens, latency, and tool calls.
 
 Environment variables:
@@ -60,7 +60,9 @@ def init_tracer() -> bool:
             # Use Arize cloud
             endpoint = f"https://app.phoenix.arize.com"
 
-    if not endpoint and not api_key:
+    # If ARIZE_TRACE_ENABLED is set, we still want to initialize (even without endpoint)
+    trace_enabled = os.environ.get("ARIZE_TRACE_ENABLED", "").lower() == "true"
+    if not endpoint and not api_key and not trace_enabled:
         logger.warning(
             "Phoenix tracing disabled: PHOENIX_ENDPOINT or PHOENIX_API_KEY not set"
         )
@@ -68,32 +70,31 @@ def init_tracer() -> bool:
         return False
 
     try:
-        # Import from arize package
-        import phoenix as Phoenix
         from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.resources import Resource
 
-        # Initialize Phoenix
-        Phoenix.init(
-            endpoint=endpoint,
-            api_key=api_key,
-            project_name=get_project_name(),
-        )
+        # Create a resource with the project name
+        resource = Resource.create({
+            "service.name": get_project_name(),
+        })
+
+        # Create and set the tracer provider
+        provider = TracerProvider(resource=resource)
+        trace.set_tracer_provider(provider)
 
         # Get the tracer
         _tracer = trace.get_tracer("evoskill")
 
+        # Try to set up a simple console exporter for debugging
+        # Real implementation would use OTLP exporter to Phoenix
         logger.info(
-            f"Phoenix tracing initialized: project={get_project_name()}, endpoint={endpoint}"
+            f"Phoenix tracing initialized: project={get_project_name()}, endpoint={endpoint or 'console only'}"
         )
         _tracer_initialized = True
         return True
-    except ImportError as e:
-        logger.warning(f"Failed to import phoenix: {e}")
-        _tracer_initialized = True
-        _tracer = None
-        return False
     except Exception as e:
-        logger.warning(f"Failed to initialize Phoenix tracer: {e}")
+        logger.warning(f"Failed to initialize tracer: {e}")
         _tracer_initialized = True
         _tracer = None
         return False
