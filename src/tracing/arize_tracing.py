@@ -1,6 +1,6 @@
 """Phoenix tracing integration for EvoSkill.
 
-This module provides tracing capabilities using Phoenix (open-source Arize).
+This module provides tracing capabilities using Arize Phoenix.
 It records LLM calls with metadata like model, tokens, latency, and tool calls.
 
 Environment variables:
@@ -59,7 +59,6 @@ def init_tracer() -> bool:
         if api_key and space_id:
             # Use Arize cloud
             endpoint = f"https://app.phoenix.arize.com"
-            api_key = api_key  # Use API key directly
 
     if not endpoint and not api_key:
         logger.warning(
@@ -69,7 +68,7 @@ def init_tracer() -> bool:
         return False
 
     try:
-        # Try to import phoenix
+        # Import from arize package
         import phoenix as Phoenix
         from opentelemetry import trace
 
@@ -88,8 +87,8 @@ def init_tracer() -> bool:
         )
         _tracer_initialized = True
         return True
-    except ImportError:
-        logger.warning("phoenix package not installed. Run: pip install phoenix")
+    except ImportError as e:
+        logger.warning(f"Failed to import phoenix: {e}")
         _tracer_initialized = True
         _tracer = None
         return False
